@@ -1,13 +1,21 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Loader2, Plus, Trash2, Video } from "lucide-react";
 import { revalidateSite } from "@/app/admin/actions";
+import { ImageField } from "@/components/admin/ImageField";
 import { AdminField, adminInput, errorMessage, ghostBtn, primaryBtn } from "@/components/admin/ui";
 import { Toast } from "@/components/forms/Toast";
 import { createBrowserSupabase } from "@/lib/supabase/client";
-import { deleteImageByUrl, uploadImage } from "@/lib/supabase/storage";
-import type { SiteSettingsRow, WhyChooseUsItemDb, TestimonialItemDb, FaqItemDb } from "@/types/db";
+import {
+  deleteImageByUrl,
+  MAX_VIDEO_MB,
+  uploadHeroVideo,
+  uploadImage,
+  validateVideo,
+} from "@/lib/supabase/storage";
+import type { FaqItemDb, SiteSettingsRow, TestimonialItemDb, WhyChooseUsItemDb } from "@/types/db";
+import type { IconName } from "@/types/site";
 
 type Values = {
   business_name: string;
@@ -18,11 +26,26 @@ type Values = {
   address: string;
   hero_title: string;
   hero_subtitle: string;
+  hero_video_url: string;
   primary_color: string;
   secondary_color: string;
   accent_color: string;
 };
 type Hours = { days: string; time: string };
+
+const ICON_OPTIONS: IconName[] = [
+  "ShieldCheck",
+  "BadgeCheck",
+  "Clock",
+  "Wrench",
+  "Zap",
+  "Sun",
+  "Battery",
+  "BatteryCharging",
+  "Award",
+  "Users",
+  "Check",
+];
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -42,6 +65,7 @@ export function BusinessInfoForm({ initial }: { initial: SiteSettingsRow }) {
     address: initial.address,
     hero_title: initial.hero_title,
     hero_subtitle: initial.hero_subtitle,
+    hero_video_url: initial.hero_video_url ?? "",
     primary_color: sanitizeHexForPicker(initial.primary_color ?? "#f97316", "#f97316"),
     secondary_color: sanitizeHexForPicker(initial.secondary_color ?? "#1e293b", "#1e293b"),
     accent_color: sanitizeHexForPicker(initial.accent_color ?? "#22c55e", "#22c55e"),
@@ -52,6 +76,12 @@ export function BusinessInfoForm({ initial }: { initial: SiteSettingsRow }) {
   const [heroImageUrl, setHeroImageUrl] = useState<string | null>(initial.hero_image_url ?? null);
   const [heroFile, setHeroFile] = useState<File | null>(null);
   const [heroRemoved, setHeroRemoved] = useState(false);
+
+  const [heroVideoFile, setHeroVideoFile] = useState<File | null>(null);
+  const [heroVideoPreview, setHeroVideoPreview] = useState<string | null>(null);
+  const [heroVideoRemoved, setHeroVideoRemoved] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+
   const [whyChooseUs, setWhyChooseUs] = useState<WhyChooseUsItemDb[]>(
     initial.why_choose_us && initial.why_choose_us.length > 0
       ? initial.why_choose_us
@@ -69,6 +99,16 @@ export function BusinessInfoForm({ initial }: { initial: SiteSettingsRow }) {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const closeToast = useCallback(() => setToast(null), []);
+
+  useEffect(() => {
+    if (!heroVideoFile) {
+      setHeroVideoPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(heroVideoFile);
+    setHeroVideoPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [heroVideoFile]);
 
   const bind = (key: keyof Values) => ({
     id: key,
@@ -115,17 +155,53 @@ export function BusinessInfoForm({ initial }: { initial: SiteSettingsRow }) {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving || !validate()) return;
+    if (saving || !validate() || videoError) return;
 
     setSaving(true);
     const oldHeroUrl = initial.hero_image_url ?? null;
+    const oldVideoUrl = initial.hero_video_url ?? null;
+
     let nextHeroUrl: string | null = heroRemoved ? null : heroImageUrl;
-    let uploadedUrl: string | null = null;
+    let uploadedImageUrl: string | null = null;
+
+    const typedVideoUrl = values.hero_video_url.trim();
+    let nextVideoUrl: string | null = heroVideoRemoved ? null : typedVideoUrl || null;
+    let uploadedVideoUrl: string | null = null;
+
     try {
       if (heroFile) {
-        uploadedUrl = await uploadImage(heroFile, "hero");
-        nextHeroUrl = uploadedUrl;
+        uploadedImageUrl = await uploadImage(heroFile, "hero");
+        nextHeroUrl = uploadedImageUrl;
       }
+      if (heroVideoFile) {
+        uploadedVideoUrl = await uploadHeroVideo(heroVideoFile);
+        nextVideoUrl = uploadedVideoUrl;
+      }
+
+      const cleanedWhy = whyChooseUs
+        .map((item) => ({
+          title: item.title.trim(),
+          text: item.text.trim(),
+          icon: item.icon,
+        }))
+        .filter((item) => item.title || item.text);
+
+      const cleanedTestimonials = testimonials
+        .map((item) => ({
+          name: item.name.trim(),
+          role: item.role.trim(),
+          quote: item.quote.trim(),
+          rating: Math.min(5, Math.max(1, Number(item.rating) || 5)),
+        }))
+        .filter((item) => item.name || item.quote);
+
+      const cleanedFaqs = faqs
+        .map((item) => ({
+          question: item.question.trim(),
+          answer: item.answer.trim(),
+        }))
+        .filter((item) => item.question || item.answer);
+
       const supabase = createBrowserSupabase();
       const { error } = await supabase
         .from("site_settings")
@@ -142,6 +218,11 @@ export function BusinessInfoForm({ initial }: { initial: SiteSettingsRow }) {
             .filter((h) => h.days && h.time),
           hero_title: values.hero_title.trim(),
           hero_subtitle: values.hero_subtitle.trim(),
+          hero_image_url: nextHeroUrl,
+          hero_video_url: nextVideoUrl,
+          why_choose_us: cleanedWhy,
+          testimonials: cleanedTestimonials,
+          faqs: cleanedFaqs,
           primary_color: values.primary_color.trim().toLowerCase(),
           secondary_color: values.secondary_color.trim().toLowerCase(),
           accent_color: values.accent_color.trim().toLowerCase(),
@@ -151,19 +232,27 @@ export function BusinessInfoForm({ initial }: { initial: SiteSettingsRow }) {
         .single();
 
       if (error) throw error;
+
       if (oldHeroUrl && oldHeroUrl !== nextHeroUrl) {
         await deleteImageByUrl(oldHeroUrl);
       }
+      if (oldVideoUrl && oldVideoUrl !== nextVideoUrl) {
+        await deleteImageByUrl(oldVideoUrl);
+      }
+
       setHeroImageUrl(nextHeroUrl);
       setHeroFile(null);
       setHeroRemoved(false);
-      if (oldHeroUrl && oldHeroUrl !== nextHeroUrl) {
-        await deleteImageByUrl(oldHeroUrl);
-      }
+
+      setValues((current) => ({ ...current, hero_video_url: nextVideoUrl ?? "" }));
+      setHeroVideoFile(null);
+      setHeroVideoRemoved(false);
+
       await revalidateSite();
-      setToast({ type: "success", message: "Business info & colors saved. Your website is updated." });
+      setToast({ type: "success", message: "Site settings saved. Your website is updated." });
     } catch (error) {
-      if (uploadedUrl) await deleteImageByUrl(uploadedUrl);
+      if (uploadedImageUrl) await deleteImageByUrl(uploadedImageUrl);
+      if (uploadedVideoUrl) await deleteImageByUrl(uploadedVideoUrl);
       setToast({ type: "error", message: errorMessage(error) });
     } finally {
       setSaving(false);
@@ -173,6 +262,8 @@ export function BusinessInfoForm({ initial }: { initial: SiteSettingsRow }) {
   const primary = bindColor("primary_color", "#f97316");
   const secondary = bindColor("secondary_color", "#1e293b");
   const accent = bindColor("accent_color", "#22c55e");
+  const activeVideoSrc =
+    heroVideoPreview ?? (heroVideoRemoved ? null : values.hero_video_url.trim() || null);
 
   return (
     <>
@@ -312,13 +403,308 @@ export function BusinessInfoForm({ initial }: { initial: SiteSettingsRow }) {
         </section>
 
         <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6">
-          <h2 className="text-lg">Home page hero text</h2>
+          <h2 className="text-lg">Home page hero text & media</h2>
           <AdminField label="Headline" htmlFor="hero_title">
             <input type="text" {...bind("hero_title")} />
           </AdminField>
           <AdminField label="Sub-headline" htmlFor="hero_subtitle">
             <textarea rows={3} {...bind("hero_subtitle")} />
           </AdminField>
+
+          <ImageField
+            label="Hero photo (also used as video poster)"
+            currentUrl={heroImageUrl}
+            file={heroFile}
+            removed={heroRemoved}
+            onPick={(file) => {
+              setHeroFile(file);
+              setHeroRemoved(false);
+            }}
+            onRemove={() => {
+              setHeroFile(null);
+              setHeroRemoved(true);
+            }}
+          />
+
+          <div className="space-y-3 border-t border-slate-100 pt-5">
+            <p className="text-sm font-semibold text-secondary">Hero video (overrides photo on hero)</p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex h-24 w-36 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-dashed border-slate-300 bg-slate-900 text-xs text-slate-400">
+                {activeVideoSrc ? (
+                  <video
+                    src={activeVideoSrc}
+                    muted
+                    playsInline
+                    loop
+                    autoPlay
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  "No video"
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <label className={`${ghostBtn} cursor-pointer`}>
+                  <Video className="h-4 w-4" aria-hidden="true" />
+                  {activeVideoSrc ? "Replace video" : "Upload video"}
+                  <input
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const picked = event.target.files?.[0];
+                      event.target.value = "";
+                      if (!picked) return;
+                      const problem = validateVideo(picked);
+                      if (problem) {
+                        setVideoError(problem);
+                        return;
+                      }
+                      setVideoError(null);
+                      setHeroVideoFile(picked);
+                      setHeroVideoRemoved(false);
+                    }}
+                  />
+                </label>
+                {activeVideoSrc && (
+                  <button
+                    type="button"
+                    className={ghostBtn}
+                    onClick={() => {
+                      setHeroVideoFile(null);
+                      setHeroVideoRemoved(true);
+                      setVideoError(null);
+                      setValues((current) => ({ ...current, hero_video_url: "" }));
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Remove video
+                  </button>
+                )}
+              </div>
+            </div>
+            <AdminField
+              label="Or paste direct video URL (.mp4 / .webm)"
+              htmlFor="hero_video_url"
+              hint={`MP4, WebM or MOV up to ${MAX_VIDEO_MB} MB when uploading, or a direct video link.`}
+            >
+              <input
+                type="url"
+                placeholder="https://.../hero-loop.mp4"
+                value={values.hero_video_url}
+                onChange={(e) => {
+                  setHeroVideoFile(null);
+                  setHeroVideoRemoved(false);
+                  setVideoError(null);
+                  setValues((current) => ({ ...current, hero_video_url: e.target.value }));
+                }}
+                className={adminInput}
+              />
+            </AdminField>
+            {videoError && <p className="text-xs text-red-600">{videoError}</p>}
+          </div>
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+          <h2 className="text-lg">Why customers trust us</h2>
+          {whyChooseUs.map((item, index) => (
+            <div key={index} className="space-y-3 rounded-xl border border-slate-100 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <select
+                  aria-label={`Trust icon, item ${index + 1}`}
+                  value={item.icon}
+                  onChange={(e) =>
+                    setWhyChooseUs((rows) =>
+                      rows.map((r, i) => (i === index ? { ...r, icon: e.target.value as IconName } : r))
+                    )
+                  }
+                  className={`${adminInput} sm:w-44`}
+                >
+                  {ICON_OPTIONS.map((ic) => (
+                    <option key={ic} value={ic}>
+                      {ic}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  aria-label={`Trust title, item ${index + 1}`}
+                  placeholder="Title (e.g. Certified Engineers)"
+                  value={item.title}
+                  onChange={(e) =>
+                    setWhyChooseUs((rows) =>
+                      rows.map((r, i) => (i === index ? { ...r, title: e.target.value } : r))
+                    )
+                  }
+                  className={adminInput}
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove trust item ${index + 1}`}
+                  onClick={() => setWhyChooseUs((rows) => rows.filter((_, i) => i !== index))}
+                  className="shrink-0 rounded-lg p-2.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <textarea
+                rows={2}
+                aria-label={`Trust description, item ${index + 1}`}
+                placeholder="Short explanation..."
+                value={item.text}
+                onChange={(e) =>
+                  setWhyChooseUs((rows) =>
+                    rows.map((r, i) => (i === index ? { ...r, text: e.target.value } : r))
+                  )
+                }
+                className={adminInput}
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            className={ghostBtn}
+            onClick={() =>
+              setWhyChooseUs((rows) => [...rows, { title: "", text: "", icon: "ShieldCheck" }])
+            }
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add trust item
+          </button>
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+          <h2 className="text-lg">What our customers say (Testimonials)</h2>
+          {testimonials.map((item, index) => (
+            <div key={index} className="space-y-3 rounded-xl border border-slate-100 p-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <input
+                  type="text"
+                  aria-label={`Customer name ${index + 1}`}
+                  placeholder="Customer name"
+                  value={item.name}
+                  onChange={(e) =>
+                    setTestimonials((rows) =>
+                      rows.map((r, i) => (i === index ? { ...r, name: e.target.value } : r))
+                    )
+                  }
+                  className={adminInput}
+                />
+                <input
+                  type="text"
+                  aria-label={`Customer role or location ${index + 1}`}
+                  placeholder="Role / area (e.g. Homeowner, Kololo)"
+                  value={item.role}
+                  onChange={(e) =>
+                    setTestimonials((rows) =>
+                      rows.map((r, i) => (i === index ? { ...r, role: e.target.value } : r))
+                    )
+                  }
+                  className={adminInput}
+                />
+                <div className="flex items-center gap-2">
+                  <select
+                    aria-label={`Rating ${index + 1}`}
+                    value={item.rating}
+                    onChange={(e) =>
+                      setTestimonials((rows) =>
+                        rows.map((r, i) =>
+                          i === index ? { ...r, rating: Number(e.target.value) } : r
+                        )
+                      )
+                    }
+                    className={adminInput}
+                  >
+                    {[5, 4, 3, 2, 1].map((n) => (
+                      <option key={n} value={n}>
+                        {n} stars
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    aria-label={`Remove testimonial ${index + 1}`}
+                    onClick={() => setTestimonials((rows) => rows.filter((_, i) => i !== index))}
+                    className="shrink-0 rounded-lg p-2.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+              <textarea
+                rows={2}
+                aria-label={`Testimonial quote ${index + 1}`}
+                placeholder="Customer quote..."
+                value={item.quote}
+                onChange={(e) =>
+                  setTestimonials((rows) =>
+                    rows.map((r, i) => (i === index ? { ...r, quote: e.target.value } : r))
+                  )
+                }
+                className={adminInput}
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            className={ghostBtn}
+            onClick={() =>
+              setTestimonials((rows) => [...rows, { name: "", role: "", quote: "", rating: 5 }])
+            }
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add testimonial
+          </button>
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+          <h2 className="text-lg">Frequently Asked Questions (FAQs)</h2>
+          {faqs.map((item, index) => (
+            <div key={index} className="space-y-3 rounded-xl border border-slate-100 p-4">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  aria-label={`FAQ question ${index + 1}`}
+                  placeholder="Question"
+                  value={item.question}
+                  onChange={(e) =>
+                    setFaqs((rows) =>
+                      rows.map((r, i) => (i === index ? { ...r, question: e.target.value } : r))
+                    )
+                  }
+                  className={adminInput}
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove FAQ ${index + 1}`}
+                  onClick={() => setFaqs((rows) => rows.filter((_, i) => i !== index))}
+                  className="shrink-0 rounded-lg p-2.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <textarea
+                rows={2}
+                aria-label={`FAQ answer ${index + 1}`}
+                placeholder="Answer..."
+                value={item.answer}
+                onChange={(e) =>
+                  setFaqs((rows) =>
+                    rows.map((r, i) => (i === index ? { ...r, answer: e.target.value } : r))
+                  )
+                }
+                className={adminInput}
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            className={ghostBtn}
+            onClick={() => setFaqs((rows) => [...rows, { question: "", answer: "" }])}
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add FAQ
+          </button>
         </section>
 
         <button type="submit" disabled={saving} className={primaryBtn}>

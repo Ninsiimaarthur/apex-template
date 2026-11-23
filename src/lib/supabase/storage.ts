@@ -42,3 +42,29 @@ export async function deleteImageByUrl(url: string | null | undefined): Promise<
     // An orphaned file is harmless; do not block the admin's save.
   }
 }
+
+export const MAX_VIDEO_MB = 25;
+const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
+
+export function validateVideo(file: File): string | null {
+  if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+    return "Please choose an MP4, WebM, or MOV video.";
+  }
+  if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
+    return `Video must be smaller than ${MAX_VIDEO_MB} MB.`;
+  }
+  return null;
+}
+
+export async function uploadHeroVideo(file: File): Promise<string> {
+  const supabase = createBrowserSupabase();
+  const ext = (file.name.split(".").pop() || "mp4").toLowerCase().replace(/[^a-z0-9]/g, "") || "mp4";
+  const path = `hero-videos/${crypto.randomUUID()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, file, { cacheControl: "31536000", contentType: file.type });
+  if (error) throw error;
+
+  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+}

@@ -84,6 +84,7 @@ export type SiteConfig = {
     primaryCta: Cta;
     secondaryCta: Cta;
     image?: string;
+    video?: string;
   };
   trustBadges: { value: string; label: string }[];
   services: Offering[];

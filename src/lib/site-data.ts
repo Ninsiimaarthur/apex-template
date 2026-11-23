@@ -145,12 +145,26 @@ export const getSiteData = cache(async (): Promise<SiteDataResult> => {
         ...siteConfig.hero,
         headline: s?.hero_title || siteConfig.hero.headline,
         subheadline: s?.hero_subtitle || siteConfig.hero.subheadline,
+        image: s?.hero_image_url !== undefined ? (s.hero_image_url ?? undefined) : siteConfig.hero.image,
+        video: s?.hero_video_url !== undefined ? (s.hero_video_url ?? undefined) : siteConfig.hero.video,
       },
       colors: {
         primaryHex: normalizeHex(s?.primary_color, DEFAULT_BRAND_COLORS.primaryHex),
         secondaryHex: normalizeHex(s?.secondary_color, DEFAULT_BRAND_COLORS.secondaryHex),
         accentHex: normalizeHex(s?.accent_color, DEFAULT_BRAND_COLORS.accentHex),
       },
+      whyChooseUs:
+        s && Array.isArray(s.why_choose_us) && s.why_choose_us.length > 0
+          ? s.why_choose_us
+          : siteConfig.whyChooseUs,
+      testimonials:
+        s && Array.isArray(s.testimonials) && s.testimonials.length > 0
+          ? s.testimonials
+          : siteConfig.testimonials,
+      faqs:
+        s && Array.isArray(s.faqs) && s.faqs.length > 0
+          ? s.faqs
+          : siteConfig.faqs,
       services: services ? toOfferings(services) : siteConfig.services,
       projects: projects
         ? { categories: Array.from(new Set(projects.map((p) => p.category))), items: projects }

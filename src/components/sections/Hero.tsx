@@ -42,7 +42,18 @@ export async function Hero() {
         </div>
 
         <div className="relative hidden aspect-[4/3] overflow-hidden rounded-2xl border border-white/10 bg-white/5 lg:block">
-          {hero.image ? (
+          {hero.video ? (
+            <video
+              src={hero.video}
+              poster={hero.image || undefined}
+              playsInline
+              autoPlay
+              muted
+              loop
+              preload="metadata"
+              className="h-full w-full object-cover"
+            />
+          ) : hero.image ? (
             <Image src={hero.image} alt="" fill priority className="object-cover" />
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-white/50">
