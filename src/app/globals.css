@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================
+   BRAND COLORS: the ONLY 3 lines to edit when rebranding.
+   Format: "H S% L%" (HSL without the hsl() wrapper).
+   Tip: use any HSL picker, then paste the three numbers.
+   ========================================================== */
+:root {
+  --primary: 24 95% 53%;   /* main brand color: buttons, highlights */
+  --secondary: 215 28% 17%; /* dark tone: hero, footer, headings */
+  --accent: 142 71% 45%;    /* supporting color: badges, checkmarks */
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-white text-slate-600 antialiased;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-bold tracking-tight text-secondary;
+  }
+}
