@@ -19,6 +19,17 @@ export default async function AdminBusinessInfoPage() {
     hours: Array.isArray(row?.hours) && row.hours.length > 0 ? row.hours : siteConfig.hours,
     hero_title: row?.hero_title ?? siteConfig.hero.headline,
     hero_subtitle: row?.hero_subtitle ?? siteConfig.hero.subheadline,
+    hero_image_url: row?.hero_image_url ?? siteConfig.hero.image ?? null,
+    hero_video_url: row?.hero_video_url ?? siteConfig.hero.video ?? null,
+    why_choose_us:
+      Array.isArray(row?.why_choose_us) && row.why_choose_us.length > 0
+        ? row.why_choose_us
+        : siteConfig.whyChooseUs,
+    testimonials:
+      Array.isArray(row?.testimonials) && row.testimonials.length > 0
+        ? row.testimonials
+        : siteConfig.testimonials,
+    faqs: Array.isArray(row?.faqs) && row.faqs.length > 0 ? row.faqs : siteConfig.faqs,
     primary_color: row?.primary_color ?? "#f97316",
     secondary_color: row?.secondary_color ?? "#1e293b",
     accent_color: row?.accent_color ?? "#22c55e",
